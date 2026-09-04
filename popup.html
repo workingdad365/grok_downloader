@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grok Library Downloader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div class="mark">G</div>
+      <div>
+        <h1>Library Downloader</h1>
+        <p>스크롤부터 저장까지 자동으로</p>
+      </div>
+    </header>
+
+    <section class="options">
+      <label><input id="images" type="checkbox" checked><span>이미지</span></label>
+      <label><input id="videos" type="checkbox" checked><span>비디오</span></label>
+    </section>
+
+    <section id="status" class="status inactive" aria-live="polite">
+      <div class="status-line"><span id="message">다운로드 시작 후 집계합니다</span><span id="count">-</span></div>
+      <div class="track"><div id="progress"></div></div>
+      <div class="stats">
+        <span>발견 <strong id="found">-</strong></span>
+        <span>요청 <strong id="downloaded">-</strong></span>
+        <span>실패 <strong id="failed">-</strong></span>
+      </div>
+    </section>
+
+    <label class="scroll-limit" for="max-scrolls">
+      <span>최대 스크롤 횟수</span>
+      <input id="max-scrolls" type="number" min="1" step="1" placeholder="비워두면 끝까지">
+    </label>
+    <button id="start" type="button">다운로드 시작</button>
+    <button id="stop" class="secondary" type="button" hidden>중지</button>
+    <p id="help" class="help">Grok 라이브러리 탭에서 실행해 주세요.</p>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

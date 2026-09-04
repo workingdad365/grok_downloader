@@ -1,0 +1,78 @@
+# 의존성
+node_modules/
+jspm_packages/
+bower_components/
+
+# 패키지 매니저 로그 / 캐시
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.npm/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# 빌드 산출물
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# 확장 패키징 산출물
+*.zip
+*.crx
+*.pem
+*.xpi
+web-ext-artifacts/
+
+# 환경 변수 / 비밀 정보
+.env
+.env.*
+!.env.example
+*.key
+secrets.json
+
+# 테스트 / 커버리지
+coverage/
+.nyc_output/
+
+# 캐시
+.cache/
+.eslintcache
+.stylelintcache
+.parcel-cache/
+
+# 로그
+logs/
+*.log
+
+# 에디터 / IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# OS 생성 파일
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# 임시 파일
+tmp/
+temp/
+*.tmp
+*.bak
+*.orig
