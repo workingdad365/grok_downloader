@@ -142,9 +142,9 @@
     return { stem: item.type, extension: item.type === "video" ? "mp4" : "jpg" };
   }
 
-  function download(item) {
+  function download(item, directoryTimestamp) {
     const { stem, extension } = originalFilename(item);
-    const filename = `Grok Library/${stem}_${Date.now()}.${extension}`;
+    const filename = `Grok Library_${directoryTimestamp}/${stem}_${Date.now()}.${extension}`;
     return new Promise((resolve) => {
       chrome.runtime.sendMessage(
         { type: "DOWNLOAD_MEDIA", url: item.url, filename },
@@ -159,10 +159,11 @@
 
     try {
       const items = await scan(options);
+      const directoryTimestamp = Date.now();
       report({ phase: "downloading", found: items.length, message: `${items.length}개 다운로드 시작` });
 
       for (let index = 0; index < items.length && !state.stopping; index += 1) {
-        const result = await download(items[index]);
+        const result = await download(items[index], directoryTimestamp);
         if (result.ok) state.downloaded += 1;
         else state.failed += 1;
         report({ message: `다운로드 요청 ${index + 1}/${items.length}` });

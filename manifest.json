@@ -1,14 +1,24 @@
 {
   "manifest_version": 3,
   "name": "Grok Library Downloader",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Grok 라이브러리를 끝까지 스크롤하여 이미지와 비디오를 일괄 다운로드합니다.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": ["downloads"],
   "host_permissions": ["https://grok.com/*", "https://*.grok.com/*"],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    },
     "default_popup": "popup.html",
     "default_title": "Grok Library Downloader"
   },
