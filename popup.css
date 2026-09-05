@@ -28,6 +28,16 @@ header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 h1 { margin: 0 0 3px; font-size: 16px; letter-spacing: .01em; }
 header p, .help { margin: 0; color: #989d94; font-size: 11px; }
 
+.version {
+  margin-left: auto;
+  align-self: flex-start;
+  padding: 3px 7px;
+  border: 1px solid #383b36;
+  border-radius: 7px;
+  color: #989d94;
+  font-size: 10px;
+}
+
 .options { display: flex; gap: 8px; margin-bottom: 12px; }
 .options label { flex: 1; cursor: pointer; }
 .options input { position: absolute; opacity: 0; }

@@ -142,6 +142,19 @@
     return { stem: item.type, extension: item.type === "video" ? "mp4" : "jpg" };
   }
 
+  function directoryStamp(date) {
+    const pad = (value) => String(value).padStart(2, "0");
+    return (
+      pad(date.getFullYear() % 100) +
+      pad(date.getMonth() + 1) +
+      pad(date.getDate()) +
+      "_" +
+      pad(date.getHours()) +
+      pad(date.getMinutes()) +
+      pad(date.getSeconds())
+    );
+  }
+
   function download(item, directoryTimestamp) {
     const { stem, extension } = originalFilename(item);
     const filename = `Grok Library_${directoryTimestamp}/${stem}_${Date.now()}.${extension}`;
@@ -159,7 +172,7 @@
 
     try {
       const items = await scan(options);
-      const directoryTimestamp = Date.now();
+      const directoryTimestamp = directoryStamp(new Date());
       report({ phase: "downloading", found: items.length, message: `${items.length}개 다운로드 시작` });
 
       for (let index = 0; index < items.length && !state.stopping; index += 1) {

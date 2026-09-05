@@ -11,10 +11,13 @@ const elements = {
   failed: document.querySelector("#failed"),
   progress: document.querySelector("#progress"),
   status: document.querySelector("#status"),
-  help: document.querySelector("#help")
+  help: document.querySelector("#help"),
+  version: document.querySelector("#version")
 };
 
 let tabId = null;
+
+elements.version.textContent = `v${chrome.runtime.getManifest().version}`;
 
 function render(state) {
   const inactive = state.phase === "idle";
