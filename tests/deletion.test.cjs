@@ -6,7 +6,7 @@ const { JSDOM } = require("jsdom");
 
 const source = readFileSync(path.join(__dirname, "..", "content.js"), "utf8");
 
-function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = true, remove = true, onDialog, lateItem = false, skipRow = -1, reorder = false, columns = 1, labelledMenu = false, deferredMenu = false, initialTop = 700, autoConfirm = true, rowOffset = 0, delayedLayout = false, scrollWithoutDelete = false, anchorAfterRowRemoval = false, phantomLastRow = false, stopDuringRecovery = false, lateAnchorAt = 0, lateAnchorRepeats = 1, anchorAfterItemRemoval = false, resultDelayRounds = 0, stopDuringResultWait = false, ignoreFirstDelete = false, onRetryMenu, keepDialog = false, onResultWait } = {}) {
+function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = true, remove = true, onDialog, lateItem = false, skipRow = -1, reorder = false, columns = 1, labelledMenu = false, deferredMenu = false, initialTop = 700, autoConfirm = true, rowOffset = 0, delayedLayout = false, scrollWithoutDelete = false, anchorAfterRowRemoval = false, phantomLastRow = false, stopDuringRecovery = false, lateAnchorAt = 0, lateAnchorRepeats = 1, anchorAfterItemRemoval = false, resultDelayRounds = 0, stopDuringResultWait = false, ignoreFirstDelete = false, onRetryMenu, keepDialog = false, onResultWait, stopDuringRescan = false, separatorRows = [] } = {}) {
   const dom = new JSDOM('<div id="library" style="overflow-y: auto"></div>', {
     url: "https://grok.com/library",
     runScripts: "outside-only"
@@ -77,6 +77,9 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
       onMessage: { addListener(callback) { listener = callback; } },
       sendMessage(message) {
         latest = message.state;
+        if (stopDuringRescan && latest.running && latest.message.includes("누락 행 재탐색")) {
+          queueMicrotask(() => listener({ type: "STOP_GROK_DOWNLOAD" }, {}, () => {}));
+        }
         if (onResultWait && latest.running && latest.message.includes("삭제 반영 확인 대기 중")) {
           const callback = onResultWait;
           onResultWait = null;
@@ -110,14 +113,31 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
     render();
   };
 
+  function dataIndex(rowIndex) {
+    let index = rowIndex + rowOffset;
+    for (const separator of [...separatorRows].sort((first, second) => first - second)) {
+      if (separator <= index) index += 1;
+    }
+    return index;
+  }
+
   function render() {
     scroller.replaceChildren();
     const first = Math.max(0, Math.floor(scroller.scrollTop / 100) - 1) * columns;
+    const firstIndex = dataIndex(Math.floor(first / columns));
+    const lastIndex = dataIndex(Math.floor((first + 5 * columns - 1) / columns));
+    for (const separator of separatorRows) {
+      if (separator < firstIndex || separator > lastIndex) continue;
+      const row = window.document.createElement("div");
+      row.dataset.index = separator;
+      row.textContent = "날짜 구분";
+      scroller.append(row);
+    }
     items.slice(first, first + 5 * columns).forEach((item, offset) => {
       const rowIndex = Math.floor((first + offset) / columns);
-      if (rowIndex === skipRow) return;
+      if (typeof skipRow === "function" ? skipRow(rowIndex, scroller.scrollTop) : rowIndex === skipRow) return;
       const row = window.document.createElement("div");
-      row.dataset.index = rowIndex + rowOffset;
+      row.dataset.index = dataIndex(rowIndex);
       row.innerHTML = `<div><button data-library-item-id="${item.id}"></button><${item.type === "image" ? "img" : "video"} src="https://assets.grok.com/${item.id}/content"></${item.type === "image" ? "img" : "video"}><button aria-haspopup="menu" aria-expanded="false">항목 작업</button></div>`;
       const trigger = row.querySelector('[aria-haspopup="menu"]');
       trigger.id = `actions-${item.id}`;
@@ -189,13 +209,19 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
 
   scroller.scrollTo({ top: initialTop });
   let scrollCalls = 0;
+  let scanStarts = 0;
   const originalScrollTo = scroller.scrollTo;
-  scroller.scrollTo = (options) => { scrollCalls += 1; originalScrollTo(options); };
+  scroller.scrollTo = (options) => {
+    scrollCalls += 1;
+    if (latest?.phase === "scanning" && options.top === 0) scanStarts += 1;
+    originalScrollTo(options);
+  };
   window.eval(source);
   return {
     deleted, deleteRequests, confirmations, confirmationAcknowledgements, items, dom,
     toastTimers,
     scrollCalls: () => scrollCalls,
+    scanStarts: () => scanStarts,
     start(options = {}) {
       if (latest && !latest.running) done = new Promise((resolve) => { finish = resolve; });
       let response;
@@ -374,11 +400,15 @@ test("400개 요청의 첫 삭제 후 같은 행이 남아도 위치 복구와 �
   fixture.dom.window.close();
 });
 
-test("삭제 진행 중에는 토스트 없이 완료 후 하나의 결과 토스트 표시", async () => {
+test("삭제 진행 중에는 확인 대기 토스트만 표시하고 완료 후 하나의 결과 토스트 표시", async () => {
   const fixture = library({ initialTop: 0, autoConfirm: false });
   const response = fixture.start({ count: 2, testMode: true });
-  assert.equal(fixture.dom.window.document.querySelector("#grok-deletion-toast"), null);
+  const pendingHost = fixture.dom.window.document.querySelector("#grok-deletion-toast");
+  assert.match(pendingHost.shadowRoot.querySelector("strong").textContent, /삭제 확인 대기/);
+  assert.match(pendingHost.shadowRoot.querySelector("p").textContent, /탐색이 완료되었습니다[\s\S]*\[테스트 삭제\] 현재 읽힌 목록 앞쪽 미디어 2개/);
+  assert.equal(fixture.toastTimers.length, 0);
   fixture.confirm(response.state.confirmation.id, true);
+  assert.equal(pendingHost.isConnected, false);
   const state = await fixture.done;
   const hosts = fixture.dom.window.document.querySelectorAll("#grok-deletion-toast");
   assert.equal(hosts.length, 1);
@@ -389,6 +419,27 @@ test("삭제 진행 중에는 토스트 없이 완료 후 하나의 결과 토�
   assert.equal(fixture.toastTimers.length, 1);
   fixture.toastTimers[0]();
   assert.equal(hosts[0].isConnected, false);
+  fixture.dom.window.close();
+});
+
+test("전체 삭제 탐색 완료 시 확인 대기 토스트를 표시하고 중지하면 결과 토스트로 교체", async () => {
+  const fixture = library({ autoConfirm: false });
+  fixture.start();
+  await new Promise((resolve) => queueMicrotask(() => queueMicrotask(resolve)));
+  for (let attempt = 0; attempt < 200 && fixture.state().phase !== "confirming"; attempt += 1) {
+    await new Promise((resolve) => queueMicrotask(resolve));
+  }
+  const pendingHost = fixture.dom.window.document.querySelector("#grok-deletion-toast");
+  assert.equal(fixture.state().phase, "confirming");
+  assert.match(pendingHost.shadowRoot.querySelector("p").textContent, /전체 20개를 삭제하시겠습니까/);
+  fixture.stop();
+  const state = await fixture.done;
+  assert.equal(state.phase, "stopped");
+  const hosts = fixture.dom.window.document.querySelectorAll("#grok-deletion-toast");
+  assert.equal(hosts.length, 1);
+  assert.equal(pendingHost.isConnected, false);
+  assert.match(hosts[0].shadowRoot.querySelector("strong").textContent, /삭제 중단/);
+  assert.deepEqual(fixture.deleted, []);
   fixture.dom.window.close();
 });
 
@@ -704,10 +755,74 @@ test("입력 개수가 수집 개수 이상이면 상단 누락도 계속 차단
   }
 });
 
+test("전체 삭제 탐색에서 32번 행을 놓치면 촘촘한 재탐색 후 전체 개수로 확인", async () => {
+  const fixture = library({
+    size: 176, columns: 4, rowOffset: 1,
+    skipRow: (row, top) => row === 31 && top % 140 === 0
+  });
+  fixture.start();
+  const state = await fixture.done;
+  assert.equal(state.phase, "done", state.message);
+  assert.equal(state.found, 176);
+  assert.equal(state.deleted, 176);
+  assert.equal(fixture.scanStarts(), 2);
+  assert.equal(fixture.confirmations.length, 1);
+  assert.match(fixture.confirmations[0], /전체 176개/);
+  assert.deepEqual(fixture.deleted, Array.from({ length: 176 }, (_, index) => `media-${175 - index}`));
+  fixture.dom.window.close();
+});
+
+test("누락 행 재탐색 중 중지하면 확인 요청과 삭제 없이 종료", async () => {
+  const fixture = library({ skipRow: 8, stopDuringRescan: true });
+  fixture.start();
+  const state = await fixture.done;
+  assert.equal(state.phase, "stopped", state.message);
+  assert.equal(state.deleted, 0);
+  assert.ok(fixture.scanStarts() <= 2);
+  assert.deepEqual(fixture.confirmations, []);
+  assert.deepEqual(fixture.deleteRequests, []);
+  fixture.dom.window.close();
+});
+
+test("현재 위치 삭제는 상단 누락과 무관하며 전체 재탐색하지 않음", async () => {
+  const fixture = library({ skipRow: 8, initialTop: 1800 });
+  fixture.start({ currentPosition: true, count: 2 });
+  assert.equal((await fixture.done).phase, "done");
+  assert.equal(fixture.scanStarts(), 0);
+  assert.deepEqual(fixture.deleted, ["media-19", "media-18"]);
+  fixture.dom.window.close();
+});
+
+test("미디어 없는 32번 구분 행이 있어도 재탐색 없이 170개 전체 삭제 확인", async () => {
+  const fixture = library({ size: 170, columns: 4, rowOffset: 1, separatorRows: [32] });
+  fixture.start();
+  const state = await fixture.done;
+  assert.equal(state.phase, "done", state.message);
+  assert.equal(state.found, 170);
+  assert.equal(state.deleted, 170);
+  assert.equal(fixture.scanStarts(), 1);
+  assert.match(fixture.confirmations[0], /전체 170개/);
+  assert.deepEqual(fixture.deleted, Array.from({ length: 170 }, (_, index) => `media-${169 - index}`));
+  fixture.dom.window.close();
+});
+
+test("구분 행 앞의 개수 지정 삭제도 구분 행을 건너 오래된 순서로 삭제", async () => {
+  const fixture = library({ size: 12, columns: 4, rowOffset: 1, separatorRows: [2] });
+  fixture.start({ count: 6 });
+  const state = await fixture.done;
+  assert.equal(state.phase, "done", state.message);
+  assert.deepEqual(fixture.deleted, ["media-11", "media-10", "media-9", "media-8", "media-7", "media-6"]);
+  fixture.dom.window.close();
+});
+
 test("중간 행 수집이 누락되면 삭제 확인 전에 중단", async () => {
   const fixture = library({ skipRow: 8 });
   fixture.start();
-  assert.equal((await fixture.done).phase, "error");
+  const state = await fixture.done;
+  assert.equal(state.phase, "error");
+  assert.equal(fixture.scanStarts(), 2);
+  assert.match(state.message, /재탐색 후에도 일부 목록 행을 읽지 못했습니다.*data-index="8" 요소가 목록에 표시되지 않았습니다/);
+  assert.deepEqual(fixture.deleteRequests, []);
   assert.deepEqual(fixture.deleted, []);
   assert.deepEqual(fixture.confirmations, []);
   fixture.dom.window.close();

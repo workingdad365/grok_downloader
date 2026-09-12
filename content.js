@@ -25,7 +25,7 @@
     chrome.runtime.sendMessage({ type: "GROK_DOWNLOAD_PROGRESS", state: { ...state } }).catch(() => {});
   }
 
-  function showDeletionToast() {
+  function showDeletionToast(pending = false) {
     document.getElementById("grok-deletion-toast")?.remove();
     const host = document.createElement("div");
     host.id = "grok-deletion-toast";
@@ -45,27 +45,28 @@
       button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
     `;
     const toast = document.createElement("section");
-    toast.className = state.phase === "error" ? "toast error" : "toast";
-    toast.setAttribute("role", state.phase === "error" ? "alert" : "status");
+    toast.className = !pending && state.phase === "error" ? "toast error" : "toast";
+    toast.setAttribute("role", !pending && state.phase === "error" ? "alert" : "status");
     toast.setAttribute("aria-atomic", "true");
     const heading = document.createElement("div");
     heading.className = "heading";
     const title = document.createElement("strong");
-    title.textContent = state.phase === "done" ? "Grok 삭제 완료"
+    title.textContent = pending ? "Grok 삭제 확인 대기"
+      : state.phase === "done" ? "Grok 삭제 완료"
       : state.phase === "cancelled" ? "Grok 삭제 취소" : "Grok 삭제 중단";
     const close = document.createElement("button");
     close.type = "button";
     close.textContent = "닫기";
-    close.setAttribute("aria-label", "삭제 결과 알림 닫기");
+    close.setAttribute("aria-label", pending ? "삭제 확인 안내 닫기" : "삭제 결과 알림 닫기");
     const message = document.createElement("p");
-    message.textContent = state.message;
+    message.textContent = pending ? `${state.message}\n\n${state.confirmation.text}` : state.message;
     heading.append(title, close);
     toast.append(heading, message);
     root.append(style, toast);
     (document.body || document.documentElement).append(host);
-    const timer = setTimeout(() => host.remove(), 12000);
+    const timer = pending ? null : setTimeout(() => host.remove(), 12000);
     close.addEventListener("click", () => {
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
       host.remove();
     });
   }
@@ -281,7 +282,8 @@
     }
   }
 
-  async function scanDeletion(options) {
+  async function scanDeletion(options, rescanMissing = false) {
+    checkDeletion();
     const initial = libraryItems();
     if (!initial.length) throw new Error("삭제 가능한 라이브러리 항목을 찾지 못했습니다");
     const scroller = libraryScroller(initial[0]);
@@ -299,6 +301,10 @@
     while (stable < 6) {
       checkDeletion();
       if (!scroller.isConnected) throw new Error("라이브러리 목록이 변경되었습니다");
+      for (const rowElement of scroller.querySelectorAll("[data-index]")) {
+        const row = Number(rowElement.dataset.index);
+        if (Number.isInteger(row) && rowElement.getClientRects().length) rows.add(row);
+      }
       const visible = libraryItems();
       for (const item of visible) {
         if (!Number.isInteger(item.row) || !scroller.contains(item.button)) {
@@ -319,10 +325,10 @@
       stalled = !atBottom && signature === previous ? stalled + 1 : 0;
       if (stalled >= 6) throw new Error("목록 끝에 도달하기 전에 스크롤이 멈췄습니다");
       previous = signature;
-      report({ found: items.size, message: atBottom
+      report({ found: items.size, message: (rescanMissing ? "누락 행 재탐색 (1/1): " : "") + (atBottom
         ? `목록 끝 확인 중 (${stable}/6): ${items.size}개`
-        : `삭제 대상 탐색 중: ${items.size}개` });
-      if (!atBottom) moveLibrary(scroller, top + Math.max(1, scroller.clientHeight * 0.7));
+        : `삭제 대상 탐색 중: ${items.size}개`) });
+      if (!atBottom) moveLibrary(scroller, top + Math.max(1, scroller.clientHeight * (rescanMissing ? 0.35 : 0.7)));
       await sleep(900);
     }
     const orderedItems = [...items.values()].sort((first, second) => first.row - second.row).reverse();
@@ -332,7 +338,12 @@
     const missingIndex = sortedRows.findIndex((row, index) => row !== requiredFirstRow + index);
     if (!sortedRows.length || missingIndex !== -1) {
       const expectedRow = requiredFirstRow + Math.max(0, missingIndex);
-      throw new Error(`일부 목록 행을 읽지 못했습니다 (검사 시작 행 ${requiredFirstRow}, 확인 필요 행 ${expectedRow}). 삭제하지 않고 중단합니다`);
+      if (!rescanMissing) {
+        report({ message: `누락 행 재탐색 (1/1): ${expectedRow}번 행 확인을 위해 작은 스크롤 간격으로 다시 읽습니다` });
+        return scanDeletion(options, true);
+      }
+      throw new Error(`재탐색 후에도 일부 목록 행을 읽지 못했습니다 (검사 시작 행 ${requiredFirstRow}, 확인 필요 행 ${expectedRow}). ` +
+        `data-index="${expectedRow}" 요소가 목록에 표시되지 않았습니다. 삭제하지 않고 중단합니다`);
     }
     return { scroller, items: orderedItems };
   }
@@ -527,13 +538,15 @@
     return new Promise((resolve) => {
       const id = `${Date.now()}:${++confirmationSequence}`;
       pendingConfirmation = { id, resolve };
-      report({ phase: "confirming", confirmation: { id, text }, message: "확장 팝업에서 삭제 실행 또는 취소를 선택해 주세요" });
+      report({ phase: "confirming", confirmation: { id, text }, message: "탐색이 완료되었습니다. 확장 팝업을 열고 삭제 실행 또는 취소를 선택해 주세요" });
+      showDeletionToast(true);
     });
   }
 
   function resolveDeletionConfirmation(confirmed) {
     const pending = pendingConfirmation;
     pendingConfirmation = null;
+    document.getElementById("grok-deletion-toast")?.remove();
     report({ confirmation: null });
     pending?.resolve(confirmed);
   }
