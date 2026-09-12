@@ -23,13 +23,19 @@
     </section>
 
     <section id="status" class="status inactive" aria-live="polite">
-      <div class="status-line"><span id="message">다운로드 시작 후 집계합니다</span><span id="count">-</span></div>
+      <div class="status-line"><span id="message">작업 대기 중</span><span id="count">-</span></div>
       <div class="track"><div id="progress"></div></div>
       <div class="stats">
         <span>발견 <strong id="found">-</strong></span>
-        <span>요청 <strong id="downloaded">-</strong></span>
+        <span><span id="handled-label">요청</span> <strong id="downloaded">-</strong></span>
         <span>실패 <strong id="failed">-</strong></span>
       </div>
+    </section>
+
+    <section id="delete-confirmation" class="delete-confirmation" aria-label="삭제 확인" hidden>
+      <p id="confirmation-text"></p>
+      <button id="confirm-delete" class="danger" type="button">영구 삭제 실행</button>
+      <button id="cancel-delete" class="secondary" type="button">취소</button>
     </section>
 
     <label class="scroll-limit" for="max-scrolls">
@@ -37,6 +43,15 @@
       <input id="max-scrolls" type="number" min="1" step="1" placeholder="비워두면 끝까지">
     </label>
     <button id="start" type="button">다운로드 시작</button>
+    <section class="delete-options" aria-label="미디어 삭제">
+      <label class="test-mode"><input id="current-position" type="checkbox">현재 위치에서 삭제 (전체 탐색 생략)</label>
+      <label class="test-mode"><input id="test-delete" type="checkbox">테스트: 앞에서부터 삭제 (스크롤 없음)</label>
+      <label class="scroll-limit" for="delete-count">
+        <span>삭제할 미디어 개수</span>
+        <input id="delete-count" type="number" min="1" step="1" placeholder="비워두면 전체">
+      </label>
+      <button id="delete" class="danger" type="button" disabled>오래된 순서로 삭제</button>
+    </section>
     <button id="stop" class="secondary" type="button" hidden>중지</button>
     <p id="help" class="help">Grok 라이브러리 탭에서 실행해 주세요.</p>
   </main>

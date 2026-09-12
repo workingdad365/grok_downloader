@@ -56,7 +56,8 @@ header p, .help { margin: 0; color: #989d94; font-size: 11px; }
 .status.inactive { opacity: .48; }
 .status-line, .stats { display: flex; justify-content: space-between; gap: 8px; }
 .status-line { font-size: 12px; }
-.status-line span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-line span:first-child { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.status-line span:last-child { flex-shrink: 0; }
 .track { height: 3px; margin: 12px 0; overflow: hidden; border-radius: 2px; background: #343733; }
 .track div { width: 0; height: 100%; background: #b5df70; transition: width .2s; }
 .track div.scanning { width: 35%; animation: scan 1.3s ease-in-out infinite alternate; }
@@ -98,6 +99,12 @@ button {
 }
 button:disabled { cursor: not-allowed; opacity: .45; }
 button.secondary { color: #ddd; background: #383b36; }
+.delete-options { margin-top: 16px; padding-top: 4px; border-top: 1px solid #383b36; }
+.test-mode { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; line-height: 1.5; }
+.delete-confirmation { margin-top: 12px; border-top: 1px solid #853a3a; }
+#confirmation-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow-y: auto; font-size: 12px; line-height: 1.5; }
+button.danger { color: #ffe6e6; background: #853a3a; border-radius: 8px; }
+button.danger:hover:not(:disabled) { background: #9b4242; }
 .help { margin-top: 10px; text-align: center; }
 
 @keyframes scan { from { transform: translateX(-100%); } to { transform: translateX(285%); } }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Grok Library Downloader",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Grok 라이브러리를 끝까지 스크롤하여 이미지와 비디오를 일괄 다운로드합니다.",
   "icons": {
     "16": "icons/icon16.png",
