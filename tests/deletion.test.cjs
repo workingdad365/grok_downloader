@@ -187,6 +187,24 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
   };
 }
 
+test("삭제 실패 진단은 대상 잔존과 스크롤 이탈을 구분하며 재삭제하지 않음", async () => {
+  for (const scrollWithoutDelete of [false, true]) {
+    const fixture = library({ size: 40, remove: false, scrollWithoutDelete });
+    fixture.start({ count: 2, video: false });
+    const state = await fixture.done;
+    assert.equal(state.phase, "error");
+    assert.equal(state.deleted, 0);
+    assert.deepEqual(fixture.deleted, []);
+    assert.match(state.message, /\[삭제 진단\] 대상=media-38/);
+    assert.ok(state.message.includes(`대상 DOM=${scrollWithoutDelete ? "없음" : "있음"}`));
+    assert.match(state.message, /확인창=0, 확인 클릭=true/);
+    assert.match(state.message, /스크롤=.*예상=.*높이=/);
+    assert.match(state.message, /이전 이웃=media-38/);
+    assert.equal(fixture.dom.window.document.querySelector("#grok-deletion-toast").shadowRoot.querySelector("p").textContent, state.message);
+    fixture.dom.window.close();
+  }
+});
+
 test("400개 요청의 첫 삭제 후 같은 행이 남아도 위치 복구와 집계 완료", async () => {
   const fixture = library({ size: 404, columns: 4, anchorAfterItemRemoval: true });
   fixture.start({ count: 400 });

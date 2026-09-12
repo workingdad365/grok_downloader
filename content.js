@@ -344,7 +344,7 @@
       if (result) return result;
       await sleep(100);
     }
-    throw new Error(errorMessage);
+    throw new Error(typeof errorMessage === "function" ? errorMessage() : errorMessage);
   }
 
   function visibleElements(selector, root = document) {
@@ -405,6 +405,21 @@
       beforeItems.at(-1)?.id === item.id && predecessor && predecessor.row <= item.row;
     let recoveringLastRow = false;
     let recoveryAttempts = 0;
+    const resultError = (reason) => {
+      const currentItems = libraryItems();
+      const last = currentItems.at(-1);
+      const currentTop = scrollPosition(scroller);
+      const height = scroller.scrollHeight;
+      const expectedTop = Math.min(beforeTop, Math.max(0, height - scroller.clientHeight));
+      const dialogs = visibleElements('[role="dialog"], [role="alertdialog"]');
+      const targetPresent = currentItems.some((candidate) => candidate.id === item.id);
+      return `${reason}\n[삭제 진단] 대상=${item.id}, 행=${item.row}, 대상 DOM=${targetPresent ? "있음" : "없음"}, ` +
+        `목록 연결=${scroller.isConnected}, 확인창=${dialogs.length}, 확인 클릭=${confirmed}, ` +
+        `메뉴=${visibleElements('[role="menu"]').length}, 복구 가능=${Boolean(canRecoverLastItem)}, 복구=${recoveryAttempts}/3\n` +
+        `스크롤=${Math.round(beforeTop)}→${Math.round(currentTop)}, 예상=${Math.round(expectedTop)}, ` +
+        `높이=${beforeHeight}→${height}, 화면 높이=${scroller.clientHeight}, ` +
+        `마지막=${last?.id || "없음"}(행 ${last?.row ?? "없음"}), 이전 이웃=${predecessor?.id || "없음"}(행 ${predecessor?.row ?? "없음"})`;
+    };
     const layoutSettled = () => {
       const expectedTop = Math.min(beforeTop, Math.max(0, scroller.scrollHeight - scroller.clientHeight));
       return scroller.isConnected && Math.abs(scrollPosition(scroller) - expectedTop) <= 2 &&
@@ -443,18 +458,18 @@
       }
       if (!deletionVisible() && !layoutSettled() && recoverLastRow()) return false;
       return deletionVisible();
-    }, "목록 재배치 또는 삭제 결과를 확인하지 못했습니다. 해당 항목은 이미 삭제됐을 수 있으므로 페이지에서 확인해 주세요");
+    }, () => resultError("목록 재배치 또는 삭제 결과를 확인하지 못했습니다. 해당 항목은 이미 삭제됐을 수 있으므로 페이지에서 확인해 주세요"));
     while (true) {
       await sleep(900);
       checkDeletion();
       if (libraryItems().some((candidate) => candidate.id === item.id)) {
-        throw new Error("삭제 항목이 다시 나타났습니다. 서버 처리 결과를 확인해 주세요");
+        throw new Error(resultError("삭제 항목이 다시 나타났습니다. 서버 처리 결과를 확인해 주세요"));
       }
       if (deletionVisible()) return;
       if (!recoverLastRow()) {
-        throw new Error("삭제 결과 확인 중 목록 위치 또는 마지막 항목이 변경되었습니다. 해당 항목은 이미 삭제됐을 수 있으므로 페이지에서 확인해 주세요");
+        throw new Error(resultError("삭제 결과 확인 중 목록 위치 또는 마지막 항목이 변경되었습니다. 해당 항목은 이미 삭제됐을 수 있으므로 페이지에서 확인해 주세요"));
       }
-      await waitDeletion(deletionVisible, "목록 끝 재확인 후 삭제 결과를 확인하지 못했습니다. 해당 항목을 페이지에서 확인해 주세요");
+      await waitDeletion(deletionVisible, () => resultError("목록 끝 재확인 후 삭제 결과를 확인하지 못했습니다. 해당 항목을 페이지에서 확인해 주세요"));
     }
   }
 
