@@ -6,7 +6,7 @@ const { JSDOM } = require("jsdom");
 
 const source = readFileSync(path.join(__dirname, "..", "content.js"), "utf8");
 
-function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = true, remove = true, onDialog, lateItem = false, skipRow = -1, reorder = false, columns = 1, labelledMenu = false, deferredMenu = false, initialTop = 700, autoConfirm = true, rowOffset = 0, delayedLayout = false, scrollWithoutDelete = false, anchorAfterRowRemoval = false, phantomLastRow = false, stopDuringRecovery = false, lateAnchorAt = 0, lateAnchorRepeats = 1, anchorAfterItemRemoval = false } = {}) {
+function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = true, remove = true, onDialog, lateItem = false, skipRow = -1, reorder = false, columns = 1, labelledMenu = false, deferredMenu = false, initialTop = 700, autoConfirm = true, rowOffset = 0, delayedLayout = false, scrollWithoutDelete = false, anchorAfterRowRemoval = false, phantomLastRow = false, stopDuringRecovery = false, lateAnchorAt = 0, lateAnchorRepeats = 1, anchorAfterItemRemoval = false, resultDelayRounds = 0, stopDuringResultWait = false } = {}) {
   const dom = new JSDOM('<div id="library" style="overflow-y: auto"></div>', {
     url: "https://grok.com/library",
     runScripts: "outside-only"
@@ -15,6 +15,9 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
   const scroller = window.document.querySelector("#library");
   const items = Array.from({ length: size }, (_, index) => ({ id: `media-${index}`, type: index % 2 ? "video" : "image" }));
   const deleted = [];
+  const deleteRequests = [];
+  let pendingDelete = null;
+  let remainingDeleteRounds = 0;
   const confirmations = [];
   const confirmationAcknowledgements = [];
   let startAcknowledged = false;
@@ -38,6 +41,11 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
       return toastTimers.length;
     }
     queueMicrotask(() => {
+      if (delay === 100 && pendingDelete && --remainingDeleteRounds <= 0) {
+        const apply = pendingDelete;
+        pendingDelete = null;
+        apply();
+      }
       if (delay === 900 && lateAnchorAt > 0 && deleted.length === lateAnchorAt && lateAnchors < lateAnchorRepeats) {
         lateAnchors += 1;
         scroller.scrollTo({ top: scroller.scrollTop - 80 });
@@ -69,6 +77,9 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
       onMessage: { addListener(callback) { listener = callback; } },
       sendMessage(message) {
         latest = message.state;
+        if (stopDuringResultWait && latest.message.includes("삭제 반영 확인 대기 중")) {
+          queueMicrotask(() => listener({ type: "STOP_GROK_DOWNLOAD" }, {}, () => {}));
+        }
         if (stopDuringRecovery && latest.message.includes("목록 끝 재확인")) {
           queueMicrotask(() => listener({ type: "STOP_GROK_DOWNLOAD" }, {}, () => {}));
         }
@@ -139,13 +150,19 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
               pendingLayout = 3;
             }
           };
-          if (!dialog) return apply();
+          const requestDelete = () => {
+            deleteRequests.push(item.id);
+            if (!resultDelayRounds) return apply();
+            pendingDelete = apply;
+            remainingDeleteRounds = resultDelayRounds;
+          };
+          if (!dialog) return requestDelete();
           const prompt = window.document.createElement("div");
           prompt.setAttribute("role", "alertdialog");
           prompt.innerHTML = '<button>취소</button><button>삭제</button>';
           prompt.lastChild.addEventListener("click", () => {
             prompt.remove();
-            apply();
+            requestDelete();
           });
           window.document.body.append(prompt);
           onDialog?.(() => listener({ type: "STOP_GROK_DOWNLOAD" }, {}, () => {}));
@@ -167,7 +184,7 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
   scroller.scrollTo = (options) => { scrollCalls += 1; originalScrollTo(options); };
   window.eval(source);
   return {
-    deleted, confirmations, confirmationAcknowledgements, items, dom,
+    deleted, deleteRequests, confirmations, confirmationAcknowledgements, items, dom,
     toastTimers,
     scrollCalls: () => scrollCalls,
     start(options = {}) {
@@ -186,6 +203,38 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
     state: () => latest
   };
 }
+
+test("삭제 반영이 8초 지연되어도 한 번만 요청하고 성공 집계", async () => {
+  const fixture = library({ resultDelayRounds: 80 });
+  fixture.start({ count: 2 });
+  const state = await fixture.done;
+  assert.equal(state.phase, "done", state.message);
+  assert.equal(state.deleted, 2);
+  assert.deepEqual(fixture.deleteRequests, ["media-19", "media-18"]);
+  assert.deepEqual(fixture.deleted, fixture.deleteRequests);
+  fixture.dom.window.close();
+});
+
+test("30초 초과 미반영은 재요청과 다음 항목 삭제 없이 중단", async () => {
+  const fixture = library({ resultDelayRounds: 400 });
+  fixture.start({ count: 2 });
+  const state = await fixture.done;
+  assert.equal(state.phase, "error");
+  assert.match(state.message, /삭제 미반영: 최대 30초/);
+  assert.equal(state.deleted, 0);
+  assert.deepEqual(fixture.deleted, []);
+  assert.deepEqual(fixture.deleteRequests, ["media-19"]);
+  fixture.dom.window.close();
+});
+
+test("삭제 반영 대기 중 중지하면 추가 요청 없이 종료", async () => {
+  const fixture = library({ resultDelayRounds: 200, stopDuringResultWait: true });
+  fixture.start({ count: 2 });
+  assert.equal((await fixture.done).phase, "stopped");
+  assert.deepEqual(fixture.deleteRequests, ["media-19"]);
+  assert.deepEqual(fixture.deleted, []);
+  fixture.dom.window.close();
+});
 
 test("삭제 실패 진단은 대상 잔존과 스크롤 이탈을 구분하며 재삭제하지 않음", async () => {
   for (const scrollWithoutDelete of [false, true]) {

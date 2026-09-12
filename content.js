@@ -337,10 +337,10 @@
     return { scroller, items: orderedItems };
   }
 
-  async function waitDeletion(read, errorMessage) {
-    for (let attempt = 0; attempt < 50; attempt += 1) {
+  async function waitDeletion(read, errorMessage, timeoutMs = 5000) {
+    for (let attempt = 0; attempt < timeoutMs / 100; attempt += 1) {
       checkDeletion();
-      const result = read();
+      const result = read(attempt * 100);
       if (result) return result;
       await sleep(100);
     }
@@ -445,7 +445,10 @@
       };
     action.click();
     let confirmed = false;
-    await waitDeletion(() => {
+    await waitDeletion((elapsed) => {
+      if (elapsed > 0 && elapsed % 5000 === 0) {
+        report({ message: `삭제 반영 확인 대기 중 (${elapsed / 1000}/30초): ${state.deleted}개 삭제 확인` });
+      }
       const dialogs = visibleElements('[role="dialog"], [role="alertdialog"]');
       if (dialogs.length) {
         if (confirmed) return false;
@@ -458,7 +461,9 @@
       }
       if (!deletionVisible() && !layoutSettled() && recoverLastRow()) return false;
       return deletionVisible();
-    }, () => resultError("목록 재배치 또는 삭제 결과를 확인하지 못했습니다. 해당 항목은 이미 삭제됐을 수 있으므로 페이지에서 확인해 주세요"));
+    }, () => resultError(libraryItems().some((candidate) => candidate.id === item.id)
+      ? "삭제 미반영: 최대 30초 대기 후에도 대상이 목록에 남아 있습니다. 요청 실패 또는 처리 지연일 수 있습니다. 재요청 없이 중단하므로 페이지에서 확인해 주세요"
+      : "목록 재배치 또는 삭제 결과를 확인하지 못했습니다. 해당 항목은 이미 삭제됐을 수 있으므로 페이지에서 확인해 주세요"), 30000);
     while (true) {
       await sleep(900);
       checkDeletion();
