@@ -6,7 +6,7 @@ const { JSDOM } = require("jsdom");
 
 const source = readFileSync(path.join(__dirname, "..", "content.js"), "utf8");
 
-function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = true, remove = true, onDialog, lateItem = false, skipRow = -1, reorder = false, columns = 1, labelledMenu = false, deferredMenu = false, initialTop = 700, autoConfirm = true, rowOffset = 0, delayedLayout = false, scrollWithoutDelete = false, anchorAfterRowRemoval = false, phantomLastRow = false, stopDuringRecovery = false, lateAnchorAt = 0, lateAnchorRepeats = 1 } = {}) {
+function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = true, remove = true, onDialog, lateItem = false, skipRow = -1, reorder = false, columns = 1, labelledMenu = false, deferredMenu = false, initialTop = 700, autoConfirm = true, rowOffset = 0, delayedLayout = false, scrollWithoutDelete = false, anchorAfterRowRemoval = false, phantomLastRow = false, stopDuringRecovery = false, lateAnchorAt = 0, lateAnchorRepeats = 1, anchorAfterItemRemoval = false } = {}) {
   const dom = new JSDOM('<div id="library" style="overflow-y: auto"></div>', {
     url: "https://grok.com/library",
     runScripts: "outside-only"
@@ -131,7 +131,7 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
             deleted.push(item.id);
             items.splice(items.indexOf(item), 1);
             scroller.scrollTo({ top: scroller.scrollTop });
-            if (anchorAfterRowRemoval && scroller.scrollHeight < oldHeight) {
+            if (anchorAfterItemRemoval || (anchorAfterRowRemoval && scroller.scrollHeight < oldHeight)) {
               scroller.scrollTo({ top: scroller.scrollTop - 80 });
             }
             if (delayedLayout && scroller.scrollHeight < oldHeight) {
@@ -186,6 +186,17 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
     state: () => latest
   };
 }
+
+test("400개 요청의 첫 삭제 후 같은 행이 남아도 위치 복구와 집계 완료", async () => {
+  const fixture = library({ size: 404, columns: 4, anchorAfterItemRemoval: true });
+  fixture.start({ count: 400 });
+  const state = await fixture.done;
+  assert.equal(state.phase, "done", `${state.message}; 실제 삭제 ${fixture.deleted.length}`);
+  assert.equal(state.deleted, 400);
+  assert.equal(state.failed, 0);
+  assert.deepEqual(fixture.deleted, Array.from({ length: 400 }, (_, index) => `media-${403 - index}`));
+  fixture.dom.window.close();
+});
 
 test("삭제 진행 중에는 토스트 없이 완료 후 하나의 결과 토스트 표시", async () => {
   const fixture = library({ initialTop: 0, autoConfirm: false });

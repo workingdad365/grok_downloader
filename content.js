@@ -400,9 +400,9 @@
     const beforeHeight = scroller.scrollHeight;
     const beforeItems = libraryItems();
     const predecessor = beforeItems.at(-2);
-    const removedLastRow = allowScrollRecovery &&
+    const canRecoverLastItem = allowScrollRecovery &&
       beforeTop + scroller.clientHeight >= beforeHeight - 2 &&
-      beforeItems.at(-1)?.id === item.id && predecessor && predecessor.row < item.row;
+      beforeItems.at(-1)?.id === item.id && predecessor && predecessor.row <= item.row;
     let recoveringLastRow = false;
     let recoveryAttempts = 0;
     const layoutSettled = () => {
@@ -419,12 +419,12 @@
         last?.id === predecessor.id && last.row === predecessor.row;
     };
       const recoverLastRow = () => {
-        if (!removedLastRow || !scroller.isConnected || recoveryAttempts >= 3 ||
+        if (!canRecoverLastItem || !scroller.isConnected || recoveryAttempts >= 3 ||
           libraryItems().some((candidate) => candidate.id === item.id)) return false;
         checkDeletion();
         recoveryAttempts += 1;
         recoveringLastRow = true;
-        report({ message: `마지막 행 삭제 결과 확인 중: 목록 끝 재확인 (${recoveryAttempts}/3)` });
+        report({ message: `마지막 항목 삭제 결과 확인 중: 목록 끝 재확인 (${recoveryAttempts}/3)` });
         moveLibrary(scroller, scroller.scrollHeight);
         return true;
       };
