@@ -6,7 +6,7 @@ const { JSDOM } = require("jsdom");
 
 const source = readFileSync(path.join(__dirname, "..", "content.js"), "utf8");
 
-function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = true, remove = true, onDialog, lateItem = false, skipRow = -1, reorder = false, columns = 1, labelledMenu = false, deferredMenu = false, initialTop = 700, autoConfirm = true, rowOffset = 0, delayedLayout = false, scrollWithoutDelete = false, anchorAfterRowRemoval = false, phantomLastRow = false, stopDuringRecovery = false, lateAnchorAt = 0, lateAnchorRepeats = 1, anchorAfterItemRemoval = false, resultDelayRounds = 0, stopDuringResultWait = false } = {}) {
+function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = true, remove = true, onDialog, lateItem = false, skipRow = -1, reorder = false, columns = 1, labelledMenu = false, deferredMenu = false, initialTop = 700, autoConfirm = true, rowOffset = 0, delayedLayout = false, scrollWithoutDelete = false, anchorAfterRowRemoval = false, phantomLastRow = false, stopDuringRecovery = false, lateAnchorAt = 0, lateAnchorRepeats = 1, anchorAfterItemRemoval = false, resultDelayRounds = 0, stopDuringResultWait = false, ignoreFirstDelete = false, onRetryMenu, keepDialog = false, onResultWait } = {}) {
   const dom = new JSDOM('<div id="library" style="overflow-y: auto"></div>', {
     url: "https://grok.com/library",
     runScripts: "outside-only"
@@ -77,6 +77,11 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
       onMessage: { addListener(callback) { listener = callback; } },
       sendMessage(message) {
         latest = message.state;
+        if (onResultWait && latest.running && latest.message.includes("삭제 반영 확인 대기 중")) {
+          const callback = onResultWait;
+          onResultWait = null;
+          callback({ window, scroller });
+        }
         if (stopDuringResultWait && latest.message.includes("삭제 반영 확인 대기 중")) {
           queueMicrotask(() => listener({ type: "STOP_GROK_DOWNLOAD" }, {}, () => {}));
         }
@@ -152,6 +157,7 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
           };
           const requestDelete = () => {
             deleteRequests.push(item.id);
+            if (ignoreFirstDelete && deleteRequests.filter((id) => id === item.id).length === 1) return;
             if (!resultDelayRounds) return apply();
             pendingDelete = apply;
             remainingDeleteRounds = resultDelayRounds;
@@ -161,13 +167,16 @@ function library({ size = 20, confirm = true, menuLabel = "삭제", dialog = tru
           prompt.setAttribute("role", "alertdialog");
           prompt.innerHTML = '<button>취소</button><button>삭제</button>';
           prompt.lastChild.addEventListener("click", () => {
-            prompt.remove();
+            if (!keepDialog) prompt.remove();
             requestDelete();
           });
           window.document.body.append(prompt);
           onDialog?.(() => listener({ type: "STOP_GROK_DOWNLOAD" }, {}, () => {}));
         });
         window.document.body.append(menu);
+        if (deleteRequests.includes(item.id)) {
+          onRetryMenu?.({ item, scroller, trigger, menu, window, render, stop: () => listener({ type: "STOP_GROK_DOWNLOAD" }, {}, () => {}) });
+        }
       };
       trigger.addEventListener("pointerdown", () => {
         opening = true;
@@ -215,15 +224,114 @@ test("삭제 반영이 8초 지연되어도 한 번만 요청하고 성공 집�
   fixture.dom.window.close();
 });
 
-test("30초 초과 미반영은 재요청과 다음 항목 삭제 없이 중단", async () => {
-  const fixture = library({ resultDelayRounds: 400 });
+test("30초 초과 미반영은 같은 ID 재시도 1회 후 다음 항목 삭제 없이 중단", async () => {
+  const fixture = library({ remove: false });
   fixture.start({ count: 2 });
   const state = await fixture.done;
   assert.equal(state.phase, "error");
   assert.match(state.message, /삭제 미반영: 최대 30초/);
   assert.equal(state.deleted, 0);
   assert.deepEqual(fixture.deleted, []);
+  assert.deepEqual(fixture.deleteRequests, ["media-19", "media-19"]);
+  assert.match(state.message, /재시도=1\/1/);
+  fixture.dom.window.close();
+});
+
+test("첫 요청 미반영 후 같은 ID 재시도로 성공하면 한 번만 집계", async () => {
+  for (const options of [{}, { currentPosition: true }, { testMode: true }]) {
+    const fixture = library({ ignoreFirstDelete: true, initialTop: 1800 });
+    fixture.start({ count: 2, ...options });
+    const state = await fixture.done;
+    assert.equal(state.phase, "done", state.message);
+    assert.equal(state.deleted, 2);
+    assert.equal(state.failed, 0);
+    assert.equal(new Set(fixture.deleted).size, 2);
+    assert.deepEqual(fixture.deleteRequests, fixture.deleted.flatMap((id) => [id, id]));
+    fixture.dom.window.close();
+  }
+});
+
+test("재시도 메뉴를 여는 동안 대상이나 위치가 바뀌거나 중지하면 추가 삭제 없음", async () => {
+  for (const change of ["id", "row", "position", "height", "removed", "stop"]) {
+    const fixture = library({
+      ignoreFirstDelete: true,
+      onRetryMenu({ trigger, scroller, stop }) {
+        const button = trigger.parentElement.querySelector("[data-library-item-id]");
+        if (change === "id") button.dataset.libraryItemId = "different-media";
+        if (change === "row") trigger.closest("[data-index]").dataset.index = "999";
+        if (change === "position") scroller.scrollTop -= 10;
+        if (change === "height") fixture.items.push({ id: "new-media", type: "image" });
+        if (change === "removed") button.remove();
+        if (change === "stop") stop();
+      }
+    });
+    fixture.start({ count: 2 });
+    const state = await fixture.done;
+    assert.equal(state.phase, change === "stop" ? "stopped" : "error", change);
+    assert.equal(state.deleted, 0);
+    assert.deepEqual(fixture.deleteRequests, ["media-19"], change);
+    assert.deepEqual(fixture.deleted, [], change);
+    fixture.dom.window.close();
+  }
+});
+
+test("삭제 확인창이 남아 있으면 같은 ID라도 재시도하지 않음", async () => {
+  const fixture = library({ remove: false, keepDialog: true });
+  fixture.start({ count: 2 });
+  assert.equal((await fixture.done).phase, "error");
   assert.deepEqual(fixture.deleteRequests, ["media-19"]);
+  assert.deepEqual(fixture.deleted, []);
+  fixture.dom.window.close();
+});
+
+test("첫 결과 대기 중 목록 또는 메뉴 상태가 바뀌면 재시도하지 않음", async () => {
+  for (const change of ["row", "position", "height", "menu", "disconnected"]) {
+    const fixture = library({
+      remove: false,
+      onResultWait({ window, scroller }) {
+        const button = scroller.querySelector('[data-library-item-id="media-19"]');
+        if (change === "row") button.closest("[data-index]").dataset.index = "999";
+        if (change === "position") scroller.scrollTop -= 10;
+        if (change === "height") fixture.items.push({ id: "new-media", type: "image" });
+        if (change === "disconnected") scroller.remove();
+        if (change === "menu") {
+          const menu = window.document.createElement("div");
+          menu.setAttribute("role", "menu");
+          window.document.body.append(menu);
+        }
+      }
+    });
+    fixture.start({ count: 2 });
+    const state = await fixture.done;
+    assert.equal(state.phase, "error", change);
+    assert.equal(state.deleted, 0);
+    assert.deepEqual(fixture.deleteRequests, ["media-19"], change);
+    fixture.dom.window.close();
+  }
+});
+
+test("재시도 확인창에서 대상이 사라지면 확인 버튼을 누르지 않음", async () => {
+  const fixture = library({
+    ignoreFirstDelete: true,
+    onDialog() {
+      if (fixture.deleteRequests.length === 1) {
+        fixture.dom.window.document.querySelector('[data-library-item-id="media-19"]').remove();
+      }
+    }
+  });
+  fixture.start({ count: 2 });
+  assert.equal((await fixture.done).phase, "error");
+  assert.deepEqual(fixture.deleteRequests, ["media-19"]);
+  assert.deepEqual(fixture.deleted, []);
+  fixture.dom.window.close();
+});
+
+test("사이트 확인창이 없어도 같은 대상 재시도 후 한 번만 집계", async () => {
+  const fixture = library({ ignoreFirstDelete: true, dialog: false });
+  fixture.start({ count: 1 });
+  assert.equal((await fixture.done).deleted, 1);
+  assert.deepEqual(fixture.deleteRequests, ["media-19", "media-19"]);
+  assert.deepEqual(fixture.deleted, ["media-19"]);
   fixture.dom.window.close();
 });
 
@@ -236,7 +344,7 @@ test("삭제 반영 대기 중 중지하면 추가 요청 없이 종료", async 
   fixture.dom.window.close();
 });
 
-test("삭제 실패 진단은 대상 잔존과 스크롤 이탈을 구분하며 재삭제하지 않음", async () => {
+test("삭제 실패 진단은 대상 잔존과 스크롤 이탈을 구분하며 재시도를 제한", async () => {
   for (const scrollWithoutDelete of [false, true]) {
     const fixture = library({ size: 40, remove: false, scrollWithoutDelete });
     fixture.start({ count: 2, video: false });
@@ -244,6 +352,7 @@ test("삭제 실패 진단은 대상 잔존과 스크롤 이탈을 구분하며 
     assert.equal(state.phase, "error");
     assert.equal(state.deleted, 0);
     assert.deepEqual(fixture.deleted, []);
+    assert.deepEqual(fixture.deleteRequests, scrollWithoutDelete ? ["media-38"] : ["media-38", "media-38"]);
     assert.match(state.message, /\[삭제 진단\] 대상=media-38/);
     assert.ok(state.message.includes(`대상 DOM=${scrollWithoutDelete ? "없음" : "있음"}`));
     assert.match(state.message, /확인창=0, 확인 클릭=true/);
@@ -636,12 +745,13 @@ test("알 수 없는 삭제 메뉴에서는 다른 메뉴를 누르지 않고 �
   fixture.dom.window.close();
 });
 
-test("삭제 결과가 반영되지 않으면 재시도 없이 중단", async () => {
+test("전체 삭제도 재시도 후 미반영이면 다음 항목 삭제 없이 중단", async () => {
   const fixture = library({ remove: false });
   fixture.start();
   const state = await fixture.done;
   assert.equal(state.phase, "error");
   assert.equal(state.deleted, 0);
+  assert.deepEqual(fixture.deleteRequests, ["media-19", "media-19"]);
   fixture.dom.window.close();
 });
 

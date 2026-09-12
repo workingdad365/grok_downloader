@@ -344,7 +344,9 @@
       if (result) return result;
       await sleep(100);
     }
-    throw new Error(typeof errorMessage === "function" ? errorMessage() : errorMessage);
+    const error = new Error(typeof errorMessage === "function" ? errorMessage() : errorMessage);
+    error.code = "GROK_DELETE_WAIT_TIMEOUT";
+    throw error;
   }
 
   function visibleElements(selector, root = document) {
@@ -372,7 +374,20 @@
     }
   }
 
-  async function deleteLibraryItem(item, scroller, allowScrollRecovery = false) {
+  async function deleteLibraryItem(item, scroller, allowScrollRecovery = false, retryAttempt = 0) {
+    const retryTop = scrollPosition(scroller);
+    const retryHeight = scroller.scrollHeight;
+    const checkRetryTarget = () => {
+      checkDeletion();
+      if (!retryAttempt) return;
+      const current = libraryItems().find((candidate) => candidate.id === item.id);
+      if (!current || current.button !== item.button || current.row !== item.row ||
+        !scroller.isConnected || libraryScroller(current) !== scroller ||
+        Math.abs(scrollPosition(scroller) - retryTop) > 2 || scroller.scrollHeight !== retryHeight) {
+        throw new Error("재시도 중 삭제 대상 또는 목록 위치가 변경되어 중단합니다");
+      }
+    };
+    checkRetryTarget();
     if (visibleElements('[role="dialog"], [role="alertdialog"], [role="menu"]').length) {
       throw new Error("열려 있는 메뉴나 대화상자를 닫은 후 다시 실행해 주세요");
     }
@@ -393,6 +408,7 @@
       });
       return matches.length === 1 ? matches[0] : null;
     }, "이 항목에 연결된 작업 메뉴를 확인할 수 없습니다");
+    checkRetryTarget();
     const action = deleteControl(menu, '[role="menuitem"]');
     if (!action) throw new Error("삭제 메뉴를 찾지 못했습니다. 메뉴 HTML 확인이 필요합니다");
     checkDeletion();
@@ -415,7 +431,7 @@
       const targetPresent = currentItems.some((candidate) => candidate.id === item.id);
       return `${reason}\n[삭제 진단] 대상=${item.id}, 행=${item.row}, 대상 DOM=${targetPresent ? "있음" : "없음"}, ` +
         `목록 연결=${scroller.isConnected}, 확인창=${dialogs.length}, 확인 클릭=${confirmed}, ` +
-        `메뉴=${visibleElements('[role="menu"]').length}, 복구 가능=${Boolean(canRecoverLastItem)}, 복구=${recoveryAttempts}/3\n` +
+        `메뉴=${visibleElements('[role="menu"]').length}, 재시도=${retryAttempt}/1, 복구 가능=${Boolean(canRecoverLastItem)}, 복구=${recoveryAttempts}/3\n` +
         `스크롤=${Math.round(beforeTop)}→${Math.round(currentTop)}, 예상=${Math.round(expectedTop)}, ` +
         `높이=${beforeHeight}→${height}, 화면 높이=${scroller.clientHeight}, ` +
         `마지막=${last?.id || "없음"}(행 ${last?.row ?? "없음"}), 이전 이웃=${predecessor?.id || "없음"}(행 ${predecessor?.row ?? "없음"})`;
@@ -445,25 +461,39 @@
       };
     action.click();
     let confirmed = false;
-    await waitDeletion((elapsed) => {
-      if (elapsed > 0 && elapsed % 5000 === 0) {
-        report({ message: `삭제 반영 확인 대기 중 (${elapsed / 1000}/30초): ${state.deleted}개 삭제 확인` });
+    try {
+      await waitDeletion((elapsed) => {
+        if (elapsed > 0 && elapsed % 5000 === 0) {
+          report({ message: `${retryAttempt ? "재시도 (1/1) " : ""}삭제 반영 확인 대기 중 (${elapsed / 1000}/30초): ${state.deleted}개 삭제 확인` });
+        }
+        const dialogs = visibleElements('[role="dialog"], [role="alertdialog"]');
+        if (dialogs.length) {
+          if (confirmed) return false;
+          if (dialogs.length !== 1) throw new Error("삭제 확인창을 특정할 수 없습니다");
+          const confirmButton = deleteControl(dialogs[0], "button");
+          if (!confirmButton) return false;
+          checkRetryTarget();
+          confirmed = true;
+          confirmButton.click();
+          return false;
+        }
+        if (!deletionVisible() && !layoutSettled() && recoverLastRow()) return false;
+        return deletionVisible();
+      }, () => resultError(libraryItems().some((candidate) => candidate.id === item.id)
+        ? "삭제 미반영: 최대 30초 대기 후에도 대상이 목록에 남아 있습니다. 요청 실패 또는 처리 지연일 수 있습니다. 추가 요청 없이 중단하므로 페이지에서 확인해 주세요"
+        : "목록 재배치 또는 삭제 결과를 확인하지 못했습니다. 해당 항목은 이미 삭제됐을 수 있으므로 페이지에서 확인해 주세요"), 30000);
+    } catch (error) {
+      checkDeletion();
+      const current = libraryItems().find((candidate) => candidate.id === item.id);
+      if (error.code !== "GROK_DELETE_WAIT_TIMEOUT" || retryAttempt || !current ||
+        current.row !== item.row || !scroller.isConnected || libraryScroller(current) !== scroller ||
+        Math.abs(scrollPosition(scroller) - beforeTop) > 2 || scroller.scrollHeight !== beforeHeight ||
+        visibleElements('[role="dialog"], [role="alertdialog"], [role="menu"]').length) {
+        throw error;
       }
-      const dialogs = visibleElements('[role="dialog"], [role="alertdialog"]');
-      if (dialogs.length) {
-        if (confirmed) return false;
-        if (dialogs.length !== 1) throw new Error("삭제 확인창을 특정할 수 없습니다");
-        const confirmButton = deleteControl(dialogs[0], "button");
-        if (!confirmButton) return false;
-        confirmed = true;
-        confirmButton.click();
-        return false;
-      }
-      if (!deletionVisible() && !layoutSettled() && recoverLastRow()) return false;
-      return deletionVisible();
-    }, () => resultError(libraryItems().some((candidate) => candidate.id === item.id)
-      ? "삭제 미반영: 최대 30초 대기 후에도 대상이 목록에 남아 있습니다. 요청 실패 또는 처리 지연일 수 있습니다. 재요청 없이 중단하므로 페이지에서 확인해 주세요"
-      : "목록 재배치 또는 삭제 결과를 확인하지 못했습니다. 해당 항목은 이미 삭제됐을 수 있으므로 페이지에서 확인해 주세요"), 30000);
+      report({ message: `삭제 미반영으로 같은 대상 재시도 (1/1): ${state.deleted}개 삭제 확인` });
+      return deleteLibraryItem(current, scroller, allowScrollRecovery, 1);
+    }
     while (true) {
       await sleep(900);
       checkDeletion();
