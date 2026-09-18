@@ -1,6 +1,10 @@
 # Grok Library Downloader
 
-`https://grok.com/library`의 이미지와 비디오를 무한 스크롤 끝까지 탐색한 뒤 다운로드하거나 오래된 순서로 삭제하는 Chrome 확장 프로그램이다.
+`https://grok.com/library`의 이미지와 비디오를 무한 스크롤 끝까지 탐색한 뒤 다운로드하거나 오래된 순서로 삭제하는 Chrome 확장 프로그램.
+
+<img src="screenshot.jpg" style="width: 30%;" />
+
+
 
 ## 설치
 
